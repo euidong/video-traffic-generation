@@ -2,3 +2,4 @@ data/
 image_folder/
 log_dir/
 output_folder/
+__pycache__/

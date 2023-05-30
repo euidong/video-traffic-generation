@@ -23,11 +23,12 @@ class LSTMGenerator(nn.Module):
         return output
 
 class LSTMDiscriminator(nn.Module):
-    def __init__(self, in_dim, out_dim, n_layers=1, hidden_dim=256):
+    def __init__(self, device, in_dim, out_dim, n_layers=1, hidden_dim=256):
         super().__init__()
         self.n_layers = n_layers
         self.hidden_dim = hidden_dim
         self.out_dim = out_dim
+        self.device = device
 
         self.lstm = nn.LSTM(in_dim, hidden_dim, n_layers, batch_first=True)
         self.linear = nn.Sequential(nn.Linear(hidden_dim, out_dim), nn.Sigmoid())

@@ -198,6 +198,9 @@ for epoch in range(opt.epochs):
             writer.add_image(f"[Fake]{l}", fake_plot, epoch)
             # torchvision.utils.save_image(fake_plot, os.path.join(opt.imf, f'{opt.run_tag}_epoch{epoch}.jpg'))
 
+output_dir = f"{opt.outf}/{run_name}"
+if not os.path.exists(output_dir):
+    os.mkdir(output_dir)
 
-torch.save(netG.state_dict(), f"{opt.outf}/generator.pt")
-torch.save(netD.state_dict(), f"{opt.outf}/discriminator.pt")
+torch.save(netG.state_dict(), f"{output_dir}/generator.pt")
+torch.save(netD.state_dict(), f"{output_dir}/discriminator.pt")
