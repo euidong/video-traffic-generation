@@ -6,15 +6,25 @@ import torch.nn.functional as F
 
 class VideoTrafficDataset(Dataset):
     norm = {}
-    def __init__(self, src_dir, seq_len=30, normalize=True):
+    def __init__(self, src_dir, seq_len=30, normalize=True, type='train'):
+        # type = ['train', 'test', 'validation']
         self.columns = ['throughput', 'packetLoss', 'delay', 'jitter', 'availableBandwidth', 'layerIndex']
         self.available_layer_index = [0, 1, 2, 8, 9, 10, 16, 17, 18]
         self.data_num = 4
-        if os.path.exists(f'{src_dir}/data_seq={seq_len}.ts'):
-            self.data = torch.load(f'{src_dir}/data_seq={seq_len}.ts')
+        if os.path.exists(f'{src_dir}/data_seq={seq_len}_type={type}.ts'):
+            self.data = torch.load(f'{src_dir}/data_seq={seq_len}_type={type}.ts')
         else:
             data = []
             df = pd.read_csv(f'{src_dir}/data.csv')
+            tot_len = len(df)
+            if type == 'train':
+                df = df.iloc[:(tot_len // 10) * 8]
+            elif type == 'test':
+                df = df[(tot_len // 10) * 8:(tot_len // 10) * 9]
+            elif type == 'validation':
+                df = df[(tot_len // 10) * 9:]
+            else:
+                df = df
             # Sequence Data 추출
             # 1. source, target 쌍으로 splitting
             # 2. 각 splitted result 마다 sequence 추출
@@ -31,7 +41,7 @@ class VideoTrafficDataset(Dataset):
                     data.append(d)
                 print(f'extracting data [{idx}/{len(groups)}]')
             self.data = torch.stack(data, dim=0)
-            torch.save(self.data, f'{src_dir}/data_seq={seq_len}.ts')
+            torch.save(self.data, f'{src_dir}/data_seq={seq_len}_type={type}.ts')
         batch_size = self.data.size(0)
         availableBandwidth = self.data[:,:,self.columns.index('availableBandwidth')].view(batch_size, seq_len, 1)
         layerIdx = self.data[:,:,self.columns.index('layerIndex')]
