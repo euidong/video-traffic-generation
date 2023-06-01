@@ -56,26 +56,29 @@ def main():
     delta_dim = data_dim
     condition_dim = dataset[0][1].size(1)
     in_dim = data_dim + delta_dim + condition_dim
+    out_dim = data_dim
     n_layers = 5
 
-    model = LSTMPredictor(device, in_dim=in_dim, n_layers=n_layers).to(device)
+    model = LSTMPredictor(device, in_dim=in_dim, condition_dim=condition_dim, out_dim=out_dim, n_layers=n_layers).to(device)
     
     print('|Predictor Architecture|\n', model)
 
-    criterion = nn.CrossEntropyLoss().to(device)
+    criterion = nn.MSELoss().to(device)
     optimizer = optim.Adam(model.parameters(), lr=opt.lr)
 
     for epoch in range(opt.epochs):
         for i, (data, condition) in enumerate(dataloader):
             batch_size, seq_len = data.size(0), data.size(1)
-            delta = (data[:, -1] - data[:, 0]).view(batch_size, 1, delta_dim).repeat(1, seq_len, 1)
-            data = torch.concat([data, delta, condition], dim=2).to(device).to(torch.float32)
-            true_next = data[:,-1,:]
-            input = data[:,:-1,:]
+            prev_seq = data[:, :-1, :]
+            true_next = data[:,-1,:].to(device).to(torch.float32)
+            delta = (prev_seq[:, -1] - prev_seq[:, 0]).view(batch_size, 1, delta_dim).repeat(1, seq_len -1, 1)
+            prev_condition = condition[:,:-1, :]
+            next_condition = condition[:, -1, :].to(device).to(torch.float32)
+            prev_seq = torch.concat([prev_seq, delta, prev_condition], dim=2).to(device).to(torch.float32)
 
             model.zero_grad()
-            output = model(input)
-            pred_next = output[:,-1,:]
+            output = model(prev_seq, next_condition)
+            pred_next = output
 
             loss = criterion(pred_next, true_next)
             loss.backward()

@@ -66,7 +66,7 @@ class VideoTrafficDataset(Dataset):
         x_min = x.min()
         self.norm[f'{label}_max'] = x_max
         self.norm[f'{label}_min'] = x_min
-        return (2 * (x - x_min)) / (x_max - x_min - 1)
+        return (2 * (x - x_min)) / (x_max - x_min) - 1
 
     def denormalize(self, x, label):
         x_max = self.norm[f'{label}_max']
