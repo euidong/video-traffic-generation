@@ -44,7 +44,7 @@ class VideoTrafficDataset(Dataset):
 
         if normalize:
             self.data = self.normalize(self.data, 'data')
-            self.condition[:,:, 0] = self.normalize(self.condition[:,:,0], 'condition')
+            self.condition[:,:, 0] = self.normalize(self.condition[:,:,0].view(-1, seq_len, 1), 'condition').view(-1, seq_len)
             self.orig_delta = self.delta[:]
             self.orig_delta_max, self.orig_delta_min = self.delta_max.clone(), self.delta_min.clone()
             self.delta = self.data[:, -1, :] - self.data[:, 0, :]
@@ -62,8 +62,8 @@ class VideoTrafficDataset(Dataset):
         )
 
     def normalize(self, x, label):
-        x_max = x.max()
-        x_min = x.min()
+        x_max = (x.max(dim=1)[0]).max(dim=0)[0]
+        x_min = (x.min(dim=1)[0]).min(dim=0)[0]
         self.norm[f'{label}_max'] = x_max
         self.norm[f'{label}_min'] = x_min
         return (2 * (x - x_min)) / (x_max - x_min) - 1
