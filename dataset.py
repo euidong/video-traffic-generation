@@ -1,84 +1,80 @@
 import os
-import json
 import torch
+import pandas as pd
 from torch.utils.data import Dataset
+import torch.nn.functional as F
 
 class VideoTrafficDataset(Dataset):
+    norm = {}
     def __init__(self, src_dir, seq_len=30, normalize=True):
-        cat_data = []
-        file_list = []
-        for root, _dirs, files in os.walk(src_dir):
-            for file in files:
-                if file.endswith(".json"):
-                    file_list.append(os.path.join(root, file))
-        for file in file_list:
-            st = file.index("-") + 1
-            end = file.index("-", st)
-            vt = (int(file[st:end])/ 100) - 1 # video type
-            vt = [1 if i == vt else 0 for i in range(4)] # one-hot encoding
-            file_data = []
-            with open(file, "r") as f:
-                content = json.load(f)
-                for c in content[10:]: # 초기 10개의 데이터는 너무 불안정해서 삭제
-                    row = []
-                    try:
-                        row.append(c["stats"]["bitrate"]["video"]["upload"])
-                    except:
-                        row.append(0)
-                    try:
-                        row.append(c["stats"]["bitrate"]["video"]["download"])
-                    except:
-                        row.append(0)
-                    try:
-                        row.append(c["stats"]["packetLoss"]["total"])
-                    except:
-                        row.append(0)
-                    row.extend(vt)
-                    file_data.append(row)
-            file_data = torch.tensor(file_data)
-            tot_len = file_data.size(0)
-            stk_data = []
-            for i in range(tot_len - seq_len + 1):
-                stk_data.append(file_data[i:i+seq_len])
-            file_data = torch.stack(stk_data, dim=0)
-            cat_data.append(file_data)
-        self.data = torch.cat(cat_data, dim=0)
-        self.delta = self.data[:, -1, :3] - self.data[:, 0, :3] # sequence 내에서 값 변화량
+        self.columns = ['throughput', 'packetLoss', 'delay', 'jitter', 'availableBandwidth', 'layerIndex']
+        self.available_layer_index = [0, 1, 2, 8, 9, 10, 16, 17, 18]
+        self.data_num = 4
+        if os.path.exists(f'{src_dir}/data_seq={seq_len}.ts'):
+            self.data = torch.load(f'{src_dir}/data_seq={seq_len}.ts')
+        else:
+            data = []
+            df = pd.read_csv(f'{src_dir}/data.csv')
+            # Sequence Data 추출
+            # 1. source, target 쌍으로 splitting
+            # 2. 각 splitted result 마다 sequence 추출
+            df = df.groupby(['source', 'target'])
+            groups = df.groups
+            for idx, group_columns in enumerate(groups):
+                group = df.get_group(group_columns)
+                group = group[self.columns]
+                if len(group) < seq_len:
+                    continue
+                tot_len = len(group)
+                for i in range(tot_len - seq_len + 1):
+                    d = torch.tensor(group.iloc[i:i+seq_len].values)
+                    data.append(d)
+                print(f'extracting data [{idx}/{len(groups)}]')
+            self.data = torch.stack(data, dim=0)
+            torch.save(self.data, f'{src_dir}/data_seq={seq_len}.ts')
+        batch_size = self.data.size(0)
+        availableBandwidth = self.data[:,:,self.columns.index('availableBandwidth')].view(batch_size, seq_len, 1)
+        layerIdx = self.data[:,:,self.columns.index('layerIndex')]
+        layerIdx = layerIdx.view(batch_size, seq_len, 1) == torch.tensor(self.available_layer_index).repeat(batch_size, seq_len, 1) # one hot encoding
+        self.condition = torch.cat([availableBandwidth, layerIdx], dim=2)
+        self.data = self.data[:,:,:self.data_num]
+
+        self.delta = self.data[:, -1, :] - self.data[:, 0, :]  #sequence 내에서 값 변화량
         self.delta_max, self.delta_min = self.delta.max(dim=0)[0], self.delta.min(dim=0)[0]
-       
+
         if normalize:
-            self.data = self.normalize(self.data)
+            self.data = self.normalize(self.data, 'data')
+            self.condition[:,:, 0] = self.normalize(self.condition[:,:,0], 'condition')
             self.orig_delta = self.delta[:]
-            self.orig_delta_max, self.orig_delta_min = self.delta_max, self.delta_min
-            self.delta = self.data[:, -1, :3] - self.data[:, 0, :3]
+            self.orig_delta_max, self.orig_delta_min = self.delta_max.clone(), self.delta_min.clone()
+            self.delta = self.data[:, -1, :] - self.data[:, 0, :]
             self.delta_max, self.delta_min = self.delta.max(dim=0)[0], self.delta.min(dim=0)[0]
         
         self.delta_mean, self.delta_std = self.delta.mean(dim=0), self.delta.std(dim=0)
-    
+
     def __len__(self):
         return len(self.data)
-    
-    def __getitem__(self, idx):
-        return self.data[idx]
 
-    def normalize(self, x):
-        '''
-        Normalize each variable in x to [-1, 1] and save x.max and x.min to class
-        '''
-        self.max = x.max()
-        self.min = x.min()
-        return (2 * (x - x.min()) / (x.max() - x.min()) - 1)
-    
-    def denormalize(self, x):
-        '''
-        Revert
-        '''
-        if not hasattr(self, 'max') or not hasattr(self, 'min'):
-            raise Exception('You must normalize first')
-        return 0.5 * (x * self.max - x * self.min + self.max + self.min)
-    
+    def __getitem__(self, idx):
+        return (
+            self.data[idx],    # (throughput, packetLoss, delay, jitter)
+            self.condition[idx], # (Available Bandwidth, Layer Index(one hot))
+        )
+
+    def normalize(self, x, label):
+        x_max = x.max()
+        x_min = x.min()
+        self.norm[f'{label}_max'] = x_max
+        self.norm[f'{label}_min'] = x_min
+        return (2 * (x - x_min)) / (x_max - x_min - 1)
+
+    def denormalize(self, x, label):
+        x_max = self.norm[f'{label}_max']
+        x_min = self.norm[f'{label}_min']
+        return 0.5 * (x * x_max - x * x_min + x_max + x_min)
+
     def sample_deltas(self, number):
-        return (torch.randn(number, 3) + self.delta_mean) * self.delta_std
-    
+        return (torch.randn(number, self.data_num) + self.delta_mean) * self.delta_std
+
     def normalize_deltas(self, x):
-        return ((self.delta_max - self.delta_min) * (x - self.or_delta_min)/(self.or_delta_max - self.or_delta_min) + self.delta_min)
+        return ((self.delta_max - self.delta_min) * (x - self.orig_delta_min)/(self.orig_delta_max - self.orig_delta_min) + self.delta_min)

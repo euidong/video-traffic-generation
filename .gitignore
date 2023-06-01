@@ -2,4 +2,5 @@ data/
 image_folder/
 log_dir/
 output_folder/
+predictor/
 __pycache__/

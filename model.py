@@ -42,3 +42,19 @@ class LSTMDiscriminator(nn.Module):
         output = self.linear(h)
         output = output.view(batch_size, seq_len, self.out_dim)
         return output
+    
+class LSTMPredictor(nn.Module):
+    def __init__(self, device, in_dim, n_layers=5):
+        super(LSTMPredictor, self).__init__()
+        self.device = device
+        self.in_dim = in_dim
+        self.n_layers = n_layers
+
+        self.lstm = nn.LSTM(in_dim, in_dim, n_layers, batch_first=True)
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        h_0 = torch.zeros(self.n_layers, batch_size, self.in_dim).to(self.device)
+        c_0 = torch.zeros(self.n_layers, batch_size, self.in_dim).to(self.device)
+        h, _ = self.lstm(x, (h_0, c_0))
+        return h
